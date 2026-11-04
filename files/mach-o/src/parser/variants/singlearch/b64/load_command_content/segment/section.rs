@@ -1,0 +1,77 @@
+use gshared::{
+    byte_order::ByteOrder, eof::EOF, iterators::FixedSizeStructIterator,
+    string::AsciiStringRef, structs::IStaticStruct,
+};
+
+use crate::parser::variants::singlearch::shared::relocation_entry::RelocationEntry;
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Section<'b> {
+    pub section_name: AsciiStringRef<'b, 16>,
+    pub segment_name: AsciiStringRef<'b, 16>,
+    pub address: u64,
+    pub size: u64,
+    pub file_offset: u32,
+    pub alignment: u32,
+    pub relocation_entries_file_offset: u32,
+    pub relocation_entries_count: u32,
+    pub flags: u32,
+    pub _reserved1: u32,
+    pub _reserved2: u32,
+    pub _reserved3: u32,
+}
+
+impl Section<'_> {
+    pub const BUFFER_SIZE: usize = 16 * 2
+        + std::mem::size_of::<u64>() * 2
+        + std::mem::size_of::<u32>() * 8;
+
+    pub fn get_relocation_entries(
+        &self,
+        byte_order: ByteOrder,
+        file_buffer: &[u8],
+    ) -> Result<impl Iterator<Item = Result<RelocationEntry, EOF>>, EOF> {
+        file_buffer
+            .get(self.relocation_entries_file_offset as usize..)
+            .ok_or(EOF)
+            .map(|buffer| {
+                FixedSizeStructIterator::new(
+                    byte_order,
+                    buffer,
+                    self.relocation_entries_count as usize,
+                )
+            })
+    }
+}
+
+impl<'b> IStaticStruct<'b, { Section::BUFFER_SIZE }> for Section<'b> {
+    #[allow(clippy::unwrap_used)]
+    fn new(
+        byte_order: ByteOrder,
+        buffer: &'b [u8; Section::BUFFER_SIZE],
+    ) -> Self {
+        Self {
+            section_name: AsciiStringRef::new(
+                buffer[0..16].try_into().unwrap(),
+            )
+            .unwrap(),
+            segment_name: AsciiStringRef::new(
+                buffer[16..32].try_into().unwrap(),
+            )
+            .unwrap(),
+            address: byte_order.read_u64(buffer[32..40].try_into().unwrap()),
+            size: byte_order.read_u64(buffer[40..48].try_into().unwrap()),
+            file_offset: byte_order
+                .read_u32(buffer[48..52].try_into().unwrap()),
+            alignment: byte_order.read_u32(buffer[52..56].try_into().unwrap()),
+            relocation_entries_file_offset: byte_order
+                .read_u32(buffer[56..60].try_into().unwrap()),
+            relocation_entries_count: byte_order
+                .read_u32(buffer[60..64].try_into().unwrap()),
+            flags: byte_order.read_u32(buffer[64..68].try_into().unwrap()),
+            _reserved1: byte_order.read_u32(buffer[68..72].try_into().unwrap()),
+            _reserved2: byte_order.read_u32(buffer[72..76].try_into().unwrap()),
+            _reserved3: byte_order.read_u32(buffer[76..80].try_into().unwrap()),
+        }
+    }
+}
