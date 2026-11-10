@@ -1,8 +1,8 @@
 pub mod header;
-pub mod load_command;
+pub mod load_command_content;
 pub mod symbol;
 
-use crate::{parser::shared::ByteOrder, shared::EOF};
+use gshared::{byte_order::ByteOrder, eof::EOF};
 
 use super::shared::{
     ifile::IFile, iload_command_content::LoadCommandIterator,
@@ -56,7 +56,7 @@ impl<'b> File<'b> {
         &self,
     ) -> impl Iterator<
         Item = Result<
-            LoadCommand<load_command::LoadCommandContent<'b>>,
+            LoadCommand<load_command_content::LoadCommandContent<'b>>,
             ParseError,
         >,
     > {

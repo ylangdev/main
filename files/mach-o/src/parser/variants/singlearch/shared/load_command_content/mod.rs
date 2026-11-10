@@ -3,12 +3,16 @@ pub mod compressed_link_edit_table;
 pub mod dylinker;
 pub mod entry_point;
 pub mod fileset_entry;
+pub mod fvmfile;
+pub mod fvmlib;
+pub mod ident;
 pub mod link_library;
 pub mod linked_it;
 pub mod linker_option;
 pub mod minimum_os_version;
 pub mod note;
 pub mod prebind_cksum;
+pub mod prebound_dylib;
 pub mod rpath;
 pub mod source_version;
 pub mod symbol_table;
@@ -16,11 +20,12 @@ pub mod symbol_table_information;
 pub mod two_level_hints;
 pub mod uuid;
 
-use super::parse_error::ParseError;
-use crate::{
-    parser::ByteOrder,
-    shared::{IDynamicStruct, parse_dynamic_struct, parse_static_struct},
+use gshared::{
+    byte_order::ByteOrder,
+    structs::{IDynamicStruct, parse_dynamic_struct, parse_static_struct},
 };
+
+use super::parse_error::ParseError;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SharedLoadCommandContent<'b> {
@@ -39,18 +44,23 @@ pub enum SharedLoadCommandContent<'b> {
     TwoLevelHints(two_level_hints::TwoLevelHints),
     Thread(&'b [u8]),
     UnixThread(&'b [u8]),
-    SubClient(&'b [u8]),
     Note(note::Note<'b>),
     LinkerOption(linker_option::LinkerOption<'b>),
     BuildVersion(build_version::BuildVersion<'b>),
     FilesetEntry(fileset_entry::FilesetEntry<'b>),
     RPath(rpath::RPath<'b>),
     PrebindCksum(prebind_cksum::PrebindCksum),
+    Fvmlib(fvmlib::Fvmlib<'b>),
+    Ident(ident::Ident<'b>),
+    Fvmfile(fvmfile::Fvmfile<'b>),
+    PreboundDylib(prebound_dylib::PreboundDylib<'b>),
+    Prepage,
 }
 
 impl<'b> SharedLoadCommandContent<'b> {
     pub fn get_size(&self) -> u32 {
         match self {
+            Self::Prepage => 0,
             Self::LinkLibrary(c) => c.get_size(),
             Self::SymbolTable(_) => {
                 symbol_table::SymbolTable::BUFFER_SIZE as u32
@@ -80,7 +90,6 @@ impl<'b> SharedLoadCommandContent<'b> {
             }
             Self::Thread(c) => c.len() as u32,
             Self::UnixThread(c) => c.len() as u32,
-            Self::SubClient(c) => c.len() as u32,
             Self::Note(_) => note::Note::BUFFER_SIZE as u32,
             Self::LinkerOption(c) => c.get_size(),
             Self::BuildVersion(c) => c.get_size(),
@@ -89,6 +98,10 @@ impl<'b> SharedLoadCommandContent<'b> {
             Self::PrebindCksum(_) => {
                 prebind_cksum::PrebindCksum::BUFFER_SIZE as u32
             }
+            Self::Fvmlib(c) => c.get_size(),
+            Self::Ident(c) => c.get_size(),
+            Self::Fvmfile(c) => c.get_size(),
+            Self::PreboundDylib(c) => c.get_size(),
         }
     }
 
@@ -98,11 +111,28 @@ impl<'b> SharedLoadCommandContent<'b> {
         buffer: &'b [u8],
     ) -> Result<Self, ParseError> {
         match command_type {
-            0x0000000C | 0x0000000D | 0x80000018 | 0x8000001F | 0x8000023 | 0x20 => {
+            0x0000000C | 0x0000000D | 0x80000018 | 0x8000001F | 0x80000023 | 0x20 => {
                 parse_dynamic_struct(byte_order, buffer)
                     .ok_or(ParseError::EOF)
                     .map(Self::LinkLibrary)
             }
+            prebound_dylib::PreboundDylib::COMMAND_TYPE =>
+                parse_dynamic_struct(byte_order, buffer)
+                    .ok_or(ParseError::EOF)
+                    .map(Self::PreboundDylib),
+            fvmfile::Fvmfile::COMMAND_TYPE =>
+                parse_dynamic_struct(byte_order, buffer)
+                    .ok_or(ParseError::EOF)
+                    .map(Self::Fvmfile),
+            ident::Ident::COMMAND_TYPE =>
+                parse_dynamic_struct(byte_order, buffer)
+                    .ok_or(ParseError::EOF)
+                    .map(Self::Ident),
+            fvmlib::Fvmlib::COMMAND_TYPE_LOADFVMLIB |
+                fvmlib::Fvmlib::COMMAND_TYPE_LC_IDFVMLIB =>
+                parse_dynamic_struct(byte_order, buffer)
+                    .ok_or(ParseError::EOF)
+                    .map(Self::Fvmlib),
             prebind_cksum::PrebindCksum::COMMAND_TYPE => {
                 parse_static_struct(byte_order, buffer)
                     .ok_or(ParseError::EOF)
@@ -129,14 +159,13 @@ impl<'b> SharedLoadCommandContent<'b> {
                     .map(Self::Note),
             4 => Ok(Self::Thread(buffer)),
             5 => Ok(Self::UnixThread(buffer)),
-            20 => Ok(Self::SubClient(buffer)),
             22 => parse_static_struct(byte_order, buffer)
                 .ok_or(ParseError::EOF)
                 .map(Self::TwoLevelHints),
             42 => parse_static_struct(byte_order, buffer)
                 .ok_or(ParseError::EOF)
                 .map(Self::SourceVersion),
-            14 | 15 | 39 | 0x12 | 0x13 | 0x15 | 0x39 =>
+            14 | 15 | 20 | 39 | 0x12 | 0x13 | 0x15 | 0x39 =>
                 parse_dynamic_struct(byte_order, buffer)
                 .ok_or(ParseError::EOF)
                 .map(Self::Dylinker),
@@ -170,6 +199,11 @@ impl<'b> SharedLoadCommandContent<'b> {
                 minimum_os_version::MinimumOSVersion::COMMAND_TYPE_IPHONEOS =>
                 parse_static_struct(byte_order, buffer).ok_or(ParseError::EOF)
                     .map(Self::MinimumOSVersion),
+            0xA => if buffer.is_empty() {
+                Ok(Self::Prepage)
+            } else {
+                Err(ParseError::ExpectedEmptyBuffer(buffer.len()))
+            },
             unknown_command_type => {
                 Err(ParseError::UnknownLoadCommandType(unknown_command_type))
             }
