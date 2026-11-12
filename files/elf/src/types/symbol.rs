@@ -1,14 +1,16 @@
-use core::mem::size_of;
+use shared::byte_order::ByteOrder;
+use shared::structs::IStaticStruct;
 
-use zerocopy::byteorder::{ByteOrder, LittleEndian, U16, U32, U64};
-use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
+use crate::parser::shared::{u16_at, u32_at, u64_at, u8_at};
+
+pub const SYM64_SIZE: usize = 24;
 
 // symbol binding
 pub const STB_LOCAL: u8 = 0;
 pub const STB_GLOBAL: u8 = 1;
 pub const STB_WEAK: u8 = 2;
 
-// symbol type 
+// symbol type
 pub const STT_NOTYPE: u8 = 0;
 pub const STT_OBJECT: u8 = 1;
 pub const STT_FUNC: u8 = 2;
@@ -128,53 +130,35 @@ impl From<SymbolVisibility> for u8 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(C)]
-pub struct Sym32<O: ByteOrder> {
-    pub st_name: U32<O>,
-    pub st_value: U32<O>,
-    pub st_size: U32<O>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sym64 {
+    pub st_name: u32,
     pub st_info: u8,
     pub st_other: u8,
-    pub st_shndx: U16<O>,
+    pub st_shndx: u16,
+    pub st_value: u64,
+    pub st_size: u64,
 }
 
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(C)]
-pub struct Sym64<O: ByteOrder> {
-    pub st_name: U32<O>,
-    pub st_info: u8,
-    pub st_other: u8,
-    pub st_shndx: U16<O>,
-    pub st_value: U64<O>,
-    pub st_size: U64<O>,
+impl<'b> IStaticStruct<'b, SYM64_SIZE> for Sym64 {
+    fn new(o: ByteOrder, buffer: &'b [u8; SYM64_SIZE]) -> Self {
+        Self {
+            st_name: u32_at(o, buffer, 0),
+            st_info: u8_at(buffer, 4),
+            st_other: u8_at(buffer, 5),
+            st_shndx: u16_at(o, buffer, 6),
+            st_value: u64_at(o, buffer, 8),
+            st_size: u64_at(o, buffer, 16),
+        }
+    }
 }
 
-// sizes must match the spec, otherwise it won't compile
-const _: [(); 16] = [(); size_of::<Sym32<LittleEndian>>()];
-const _: [(); 24] = [(); size_of::<Sym64<LittleEndian>>()];
-
-impl<O: ByteOrder> Sym32<O> {
-    pub fn get_sym_type(&self) -> SymbolType {
+impl Sym64 {
+    pub fn sym_type(&self) -> SymbolType {
         SymbolType::from(self.st_info & 0xf)
     }
 
-    pub fn get_binding(&self) -> SymbolBinding {
-        SymbolBinding::from(self.st_info >> 4)
-    }
-
-    pub fn visibility(&self) -> SymbolVisibility {
-        SymbolVisibility::from(self.st_other & 0x3)
-    }
-}
-
-impl<O: ByteOrder> Sym64<O> {
-    pub fn get_sym_type(&self) -> SymbolType {
-        SymbolType::from(self.st_info & 0xf)
-    }
-
-    pub fn get_binding(&self) -> SymbolBinding {
+    pub fn binding(&self) -> SymbolBinding {
         SymbolBinding::from(self.st_info >> 4)
     }
 
