@@ -1,5 +1,7 @@
 use shared::byte_order::ByteOrder;
 
+use std::ffi::CStr;
+
 pub fn u8_at(buffer: &[u8], offset: usize) -> u8 {
     buffer[offset]
 }
@@ -28,4 +30,8 @@ pub fn u64_at(o: ByteOrder, buffer: &[u8], offset: usize) -> u64 {
         buffer[offset + 6],
         buffer[offset + 7],
     ])
+}
+pub fn name_at<'a>(strtab: &'a [u8], offset: u32) -> Option<&'a CStr> {
+    let start = usize::try_from(offset).ok()?;
+    CStr::from_bytes_until_nul(strtab.get(start..)?).ok()
 }
