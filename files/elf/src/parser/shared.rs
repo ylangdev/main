@@ -1,5 +1,5 @@
 use shared::byte_order::ByteOrder;
-
+use crate::{ElfError,Result};
 use std::ffi::CStr;
 
 pub fn u8_at(buffer: &[u8], offset: usize) -> u8 {
@@ -18,7 +18,23 @@ pub fn u32_at(o: ByteOrder, buffer: &[u8], offset: usize) -> u32 {
         buffer[offset + 3],
     ])
 }
+pub fn slice_at<'a>(
+    buf: &'a [u8],
+    what: &'static str,
+    offset: u64,
+    size: u64,
+) -> Result<&'a [u8]> {
+    let start = usize::try_from(offset).map_err(|_| ElfError::Overflow { what })?;
+    let len = usize::try_from(size).map_err(|_| ElfError::Overflow { what })?;
+    let end = start.checked_add(len).ok_or(ElfError::Overflow { what })?;
 
+    buf.get(start..end).ok_or(ElfError::OutOfBounds {
+        what,
+        offset,
+        size,
+        buffer_len: buf.len(),
+    })
+}
 pub fn u64_at(o: ByteOrder, buffer: &[u8], offset: usize) -> u64 {
     o.read_u64([
         buffer[offset],

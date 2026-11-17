@@ -9,8 +9,6 @@ use crate::types::section::Shdr64;
 use crate::types::symbol::{Sym64, SYM64_SIZE};
 use crate::{ElfError, Result};
 
-use crate::parser::b64::sections::section_by_index;
-pub use crate::parser::shared::name_at;
 
 
 const SYM64_ENTRY: u64 = SYM64_SIZE as u64;
@@ -22,7 +20,6 @@ pub fn sym64_iter<'b>(
     FixedSizeStructIterator::new(byte_order, table, table.len() / SYM64_SIZE)
 }
 
-// symbols of one sht_symtab / sht_dynsym section
 pub fn symbols<'a>(
     file: &ElfFile<'a>,
     symtab: &Shdr64,
@@ -42,7 +39,6 @@ pub fn symbols<'a>(
         });
     }
 
-    // whole entries only, so the multiplication below can't exceed sh_size
     let count = symtab.sh_size / SYM64_ENTRY;
     let table = slice_at(
         file.buf(),
@@ -53,7 +49,6 @@ pub fn symbols<'a>(
     Ok(sym64_iter(table, file.byte_order))
 }
 
-// string table that holds the names for this symbol table (sh_link)
 pub fn strtab_for<'a>(file: &ElfFile<'a>, symtab: &Shdr64) -> Result<&'a [u8]> {
     let index = usize::try_from(symtab.sh_link).unwrap_or(usize::MAX);
     let Some(Ok(strtab)) = section_headers(file)?.nth(index) else {
@@ -66,14 +61,9 @@ pub fn strtab_for<'a>(file: &ElfFile<'a>, symtab: &Shdr64) -> Result<&'a [u8]> {
     };
     slice_at(file.buf(), "string table", strtab.sh_offset, strtab.sh_size)
 }
-
-// st_name is a byte offset into the string table, not an index
 pub fn name_at(strtab: &[u8], offset: u32) -> Option<&std::ffi::CStr> {
     let start = usize::try_from(offset).ok()?;
     std::ffi::CStr::from_bytes_until_nul(strtab.get(start..)?).ok()
 }
 
-pub fn strtab_for<'a>(file: &ElfFile<'a>, symtab: &Shdr64) -> Result<&'a [u8]> {
-    let strtab = section_by_index(file, symtab.sh_link)?;
-    slice_at(file.buf(), "string table", strtab.sh_offset, strtab.sh_size)
-}
+

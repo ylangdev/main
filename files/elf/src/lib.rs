@@ -18,7 +18,6 @@ pub type Result<T> = core::result::Result<T, ElfError>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ElfError {
-    // Неверная магия \x7fELF
     #[error("invalid ELF magic: expected 7f 45 4c 46, found {found:02x?}")]
     BadMagic { found: [u8; 4] },
 
