@@ -4,7 +4,6 @@ use shared::structs::IStaticStruct;
 use crate::parser::shared::{u32_at, u64_at};
 use crate::types::flags::SectionFlags;
 
-// section types (sh_type)
 pub const SHT_NULL: u32 = 0;
 pub const SHT_PROGBITS: u32 = 1;
 pub const SHT_SYMTAB: u32 = 2;
@@ -17,7 +16,6 @@ pub const SHT_NOBITS: u32 = 8;
 pub const SHT_REL: u32 = 9;
 pub const SHT_DYNSYM: u32 = 11;
 
-// ranges reserved for the OS and processor
 pub const SHT_LOOS: u32 = 0x6000_0000;
 pub const SHT_HIOS: u32 = 0x6fff_ffff;
 pub const SHT_LOPROC: u32 = 0x7000_0000;
@@ -38,11 +36,9 @@ pub enum SectionType {
     DynSym,
     OsSpecific(u32),
     ProcSpecific(u32),
-    // anything outside the groups above, raw value is kept
     Unknown(u32),
 }
 
-// u32 -> SectionType
 impl From<u32> for SectionType {
     fn from(value: u32) -> Self {
         match value {
@@ -64,7 +60,6 @@ impl From<u32> for SectionType {
     }
 }
 
-// SectionType -> u32, used when writing header
 impl From<SectionType> for u32 {
     fn from(value: SectionType) -> Self {
         match value {
@@ -128,3 +123,47 @@ impl Shdr64 {
         SectionFlags(self.sh_flags)
     }
 }
+
+pub const SHDR32_SIZE: usize = 40;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shdr32 {
+    pub sh_name: u32,
+    pub sh_type: u32,
+    pub sh_flags: u32,
+    pub sh_addr: u32,
+    pub sh_offset: u32,
+    pub sh_size: u32,
+    pub sh_link: u32,
+    pub sh_info: u32,
+    pub sh_addralign: u32,
+    pub sh_entsize: u32,
+}
+
+impl<'b> IStaticStruct<'b, SHDR32_SIZE> for Shdr32 {
+    fn new(o: ByteOrder, buffer: &'b [u8; SHDR32_SIZE]) -> Self {
+        Self {
+            sh_name: u32_at(o, buffer, 0),
+            sh_type: u32_at(o, buffer, 4),
+            sh_flags: u32_at(o, buffer, 8),
+            sh_addr: u32_at(o, buffer, 12),
+            sh_offset: u32_at(o, buffer, 16),
+            sh_size: u32_at(o, buffer, 20),
+            sh_link: u32_at(o, buffer, 24),
+            sh_info: u32_at(o, buffer, 28),
+            sh_addralign: u32_at(o, buffer, 32),
+            sh_entsize: u32_at(o, buffer, 36),
+        }
+    }
+}
+
+impl Shdr32 {
+    pub fn section_type(&self) -> SectionType {
+        SectionType::from(self.sh_type)
+    }
+
+    pub fn flags(&self) -> SectionFlags {
+        SectionFlags(u64::from(self.sh_flags))
+    }
+}
+

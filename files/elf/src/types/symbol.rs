@@ -166,3 +166,43 @@ impl Sym64 {
         SymbolVisibility::from(self.st_other & 0x3)
     }
 }
+
+
+pub const SYM32_SIZE: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sym32 {
+    pub st_name: u32,
+    pub st_value: u32,
+    pub st_size: u32,
+    pub st_info: u8,
+    pub st_other: u8,
+    pub st_shndx: u16,
+}
+
+impl<'b> IStaticStruct<'b, SYM32_SIZE> for Sym32 {
+    fn new(o: ByteOrder, buffer: &'b [u8; SYM32_SIZE]) -> Self {
+        Self {
+            st_name: u32_at(o, buffer, 0),
+            st_value: u32_at(o, buffer, 4),
+            st_size: u32_at(o, buffer, 8),
+            st_info: u8_at(buffer, 12),
+            st_other: u8_at(buffer, 13),
+            st_shndx: u16_at(o, buffer, 14),
+        }
+    }
+}
+
+impl Sym32 {
+    pub fn sym_type(&self) -> SymbolType {
+        SymbolType::from(self.st_info & 0xf)
+    }
+
+    pub fn binding(&self) -> SymbolBinding {
+        SymbolBinding::from(self.st_info >> 4)
+    }
+
+    pub fn visibility(&self) -> SymbolVisibility {
+        SymbolVisibility::from(self.st_other & 0x3)
+    }
+}

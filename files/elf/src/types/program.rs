@@ -109,3 +109,43 @@ impl Phdr64 {
         SegmentFlags(self.p_flags)
     }
 }
+
+pub const PHDR32_SIZE: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Phdr32 {
+    pub p_type: u32,
+    pub p_offset: u32,
+    pub p_vaddr: u32,
+    pub p_paddr: u32,
+    pub p_filesz: u32,
+    pub p_memsz: u32,
+    pub p_flags: u32,
+    pub p_align: u32,
+}
+
+impl<'b> IStaticStruct<'b, PHDR32_SIZE> for Phdr32 {
+    fn new(o: ByteOrder, buffer: &'b [u8; PHDR32_SIZE]) -> Self {
+        Self {
+            p_type: u32_at(o, buffer, 0),
+            p_offset: u32_at(o, buffer, 4),
+            p_vaddr: u32_at(o, buffer, 8),
+            p_paddr: u32_at(o, buffer, 12),
+            p_filesz: u32_at(o, buffer, 16),
+            p_memsz: u32_at(o, buffer, 20),
+            // in ELF32 flags come after p_memsz
+            p_flags: u32_at(o, buffer, 24),
+            p_align: u32_at(o, buffer, 28),
+        }
+    }
+}
+
+impl Phdr32 {
+    pub fn segment_type(&self) -> SegmentType {
+        SegmentType::from(self.p_type)
+    }
+
+    pub fn flags(&self) -> SegmentFlags {
+        SegmentFlags(self.p_flags)
+    }
+}
