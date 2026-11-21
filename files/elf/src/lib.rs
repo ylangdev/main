@@ -10,6 +10,7 @@
 
 pub mod parser;
 pub mod types;
+pub mod writer;
 
 use thiserror::Error;
 use crate::types::header::ElfClass;
