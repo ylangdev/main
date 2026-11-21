@@ -75,6 +75,8 @@ pub fn shstrtab<'a>(file: &ElfFile<'a>) -> Result<&'a [u8]> {
     )
 }
 
-pub fn section_name<'a>(file: &ElfFile<'a>, section: &Shdr64) -> Result<Option<&'a CStr>> {
-    Ok(name_at(shstrtab(file)?, section.sh_name))
+
+pub fn section_name<'a>(file: &ElfFile<'a>, shdr: &Shdr64) -> Result<Option<&'a CStr>> {
+    let table = shstrtab(file)?;
+    Ok(name_at(table, shdr.sh_name))
 }

@@ -1,10 +1,9 @@
 use core::mem::size_of;
-use zerocopy::byteorder::{ByteOrder, LittleEndian, U16, U32, U64};
-use zerocopy::{FromBytes, Immutable, KnownLayout, Unaligned};
-
+use ::shared::byte_order::ByteOrder;
+use ::shared::structs::{parse_static_struct, IStaticStruct};
+use crate::parser::shared::{slice_at, u16_at, u32_at, u64_at};
 use crate::{ElfError, Result};
 
-// Константы спецификации
 pub const ELFMAG: [u8; 4] = [0x7f, b'E', b'L', b'F'];
 pub const EI_NIDENT: usize = 16;
 pub const EV_CURRENT: u8 = 1;
@@ -119,8 +118,7 @@ impl From<ElfType> for u16 {
     }
 }
 
-// Первые 16 байт файла
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout, Unaligned)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct Ident {
     pub magic: [u8; 4],
@@ -132,13 +130,39 @@ pub struct Ident {
     pub pad: [u8; 7],
 }
 
+impl<'b> IStaticStruct<'b, EI_NIDENT> for Ident {
+    fn new(_o: ByteOrder, buffer: &'b [u8; EI_NIDENT]) -> Self {
+        Self {
+            magic: [buffer[0], buffer[1], buffer[2], buffer[3]],
+            class: buffer[4],
+            data: buffer[5],
+            version: buffer[6],
+            os_abi: buffer[7],
+            abi_version: buffer[8],
+            pad: [
+                buffer[9], buffer[10], buffer[11], buffer[12], buffer[13], buffer[14], buffer[15],
+            ],
+        }
+    }
+}
+
 impl Ident {
-    pub fn parse(bytes: &[u8]) -> Result<&Self> {
-        let (ident, _) = Self::ref_from_prefix(bytes).map_err(|_| ElfError::UnexpectedEof {
-            offset: 0,
-            needed: EI_NIDENT,
-            available: bytes.len(),
+    pub fn parse(bytes: &[u8]) -> Result<Self> {
+        let raw_slice = slice_at(bytes, "ELF ident", 0, EI_NIDENT as u64).map_err(|_| {
+            ElfError::UnexpectedEof {
+                offset: 0,
+                needed: EI_NIDENT,
+                available: bytes.len(),
+            }
         })?;
+
+        let ident = parse_static_struct::<EI_NIDENT, Self>(ByteOrder::LittleEndian, raw_slice)
+            .ok_or(ElfError::UnexpectedEof {
+                offset: 0,
+                needed: EI_NIDENT,
+                available: bytes.len(),
+            })?;
+
         ident.check_magic()?;
         Ok(ident)
     }
@@ -162,104 +186,79 @@ impl Ident {
 
 const _: [(); EI_NIDENT] = [(); size_of::<Ident>()];
 
-// Общий парсинг и проверка заголовков
-macro_rules! impl_ehdr_common {
-    ($ty:ident, $class:expr, $size:literal) => {
-        const _: [(); $size] = [(); size_of::<$ty<LittleEndian>>()];
+pub const EHDR32_SIZE: usize = 52;
+pub const EHDR64_SIZE: usize = 64;
 
-        impl<O: ByteOrder> $ty<O> {
-            pub const CLASS: ElfClass = $class;
-            pub const EHSIZE: u16 = $size;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ehdr32 {
+    pub e_type: u16,
+    pub e_machine: u16,
+    pub e_version: u32,
+    pub e_entry: u32,
+    pub e_phoff: u32,
+    pub e_shoff: u32,
+    pub e_flags: u32,
+    pub e_ehsize: u16,
+    pub e_phentsize: u16,
+    pub e_phnum: u16,
+    pub e_shentsize: u16,
+    pub e_shnum: u16,
+    pub e_shstrndx: u16,
+}
 
-            pub fn parse(bytes: &[u8]) -> Result<&Self> {
-                let (hdr, _) = Self::ref_from_prefix(bytes).map_err(|_| ElfError::UnexpectedEof {
-                    offset: 0,
-                    needed: usize::from(Self::EHSIZE),
-                    available: bytes.len(),
-                })?;
-                hdr.validate()?;
-                Ok(hdr)
-            }
-
-            pub fn validate(&self) -> Result<()> {
-                self.e_ident.check_magic()?;
-
-                let class = self.e_ident.class()?;
-                if class != Self::CLASS {
-                    return Err(ElfError::ClassMismatch {
-                        expected: Self::CLASS,
-                        found: class,
-                    });
-                }
-
-                self.e_ident.data()?;
-
-                if self.e_ident.version != EV_CURRENT {
-                    return Err(ElfError::UnsupportedVersion(u32::from(self.e_ident.version)));
-                }
-
-                let version = self.e_version.get();
-                if version != u32::from(EV_CURRENT) {
-                    return Err(ElfError::UnsupportedVersion(version));
-                }
-
-                let ehsize = self.e_ehsize.get();
-                if ehsize != Self::EHSIZE {
-                    return Err(ElfError::InvalidHeaderSize {
-                        expected: Self::EHSIZE,
-                        found: ehsize,
-                    });
-                }
-
-                Ok(())
-            }
-
-            pub fn file_type(&self) -> ElfType {
-                ElfType::from(self.e_type.get())
-            }
+impl<'b> IStaticStruct<'b, 36> for Ehdr32 {
+    fn new(o: ByteOrder, buffer: &'b [u8; 36]) -> Self {
+        Self {
+            e_type: u16_at(o, buffer, 0),
+            e_machine: u16_at(o, buffer, 2),
+            e_version: u32_at(o, buffer, 4),
+            e_entry: u32_at(o, buffer, 8),
+            e_phoff: u32_at(o, buffer, 12),
+            e_shoff: u32_at(o, buffer, 16),
+            e_flags: u32_at(o, buffer, 20),
+            e_ehsize: u16_at(o, buffer, 24),
+            e_phentsize: u16_at(o, buffer, 26),
+            e_phnum: u16_at(o, buffer, 28),
+            e_shentsize: u16_at(o, buffer, 30),
+            e_shnum: u16_at(o, buffer, 32),
+            e_shstrndx: u16_at(o, buffer, 34),
         }
-    };
+    }
 }
 
-// Заголовок 32-битного ELF (52 байта)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(C)]
-pub struct Ehdr32<O: ByteOrder> {
-    pub e_ident: Ident,
-    pub e_type: U16<O>,
-    pub e_machine: U16<O>,
-    pub e_version: U32<O>,
-    pub e_entry: U32<O>,
-    pub e_phoff: U32<O>,
-    pub e_shoff: U32<O>,
-    pub e_flags: U32<O>,
-    pub e_ehsize: U16<O>,
-    pub e_phentsize: U16<O>,
-    pub e_phnum: U16<O>,
-    pub e_shentsize: U16<O>,
-    pub e_shnum: U16<O>,
-    pub e_shstrndx: U16<O>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ehdr64 {
+    pub e_type: u16,
+    pub e_machine: u16,
+    pub e_version: u32,
+    pub e_entry: u64,
+    pub e_phoff: u64,
+    pub e_shoff: u64,
+    pub e_flags: u32,
+    pub e_ehsize: u16,
+    pub e_phentsize: u16,
+    pub e_phnum: u16,
+    pub e_shentsize: u16,
+    pub e_shnum: u16,
+    pub e_shstrndx: u16,
 }
 
-// Заголовок 64-битного ELF (64 байта)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(C)]
-pub struct Ehdr64<O: ByteOrder> {
-    pub e_ident: Ident,
-    pub e_type: U16<O>,
-    pub e_machine: U16<O>,
-    pub e_version: U32<O>,
-    pub e_entry: U64<O>,
-    pub e_phoff: U64<O>,
-    pub e_shoff: U64<O>,
-    pub e_flags: U32<O>,
-    pub e_ehsize: U16<O>,
-    pub e_phentsize: U16<O>,
-    pub e_phnum: U16<O>,
-    pub e_shentsize: U16<O>,
-    pub e_shnum: U16<O>,
-    pub e_shstrndx: U16<O>,
+impl<'b> IStaticStruct<'b, 48> for Ehdr64 {
+    fn new(o: ByteOrder, buffer: &'b [u8; 48]) -> Self {
+        Self {
+            e_type: u16_at(o, buffer, 0),
+            e_machine: u16_at(o, buffer, 2),
+            e_version: u32_at(o, buffer, 4),
+            e_entry: u64_at(o, buffer, 8),
+            e_phoff: u64_at(o, buffer, 16),
+            e_shoff: u64_at(o, buffer, 24),
+            e_flags: u32_at(o, buffer, 32),
+            e_ehsize: u16_at(o, buffer, 36),
+            e_phentsize: u16_at(o, buffer, 38),
+            e_phnum: u16_at(o, buffer, 40),
+            e_shentsize: u16_at(o, buffer, 42),
+            e_shnum: u16_at(o, buffer, 44),
+            e_shstrndx: u16_at(o, buffer, 46),
+        }
+    }
 }
-
-impl_ehdr_common!(Ehdr32, ElfClass::Elf32, 52);
-impl_ehdr_common!(Ehdr64, ElfClass::Elf64, 64);

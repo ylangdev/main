@@ -1,23 +1,37 @@
-use shared::byte_order::ByteOrder;
-use crate::{ElfError,Result};
 use std::ffi::CStr;
 
+use shared::byte_order::ByteOrder;
+
+use crate::{ElfError, Result};
+
 pub fn u8_at(buffer: &[u8], offset: usize) -> u8 {
-    buffer[offset]
+    buffer.get(offset).copied().unwrap_or_default()
 }
 
 pub fn u16_at(o: ByteOrder, buffer: &[u8], offset: usize) -> u16 {
-    o.read_u16([buffer[offset], buffer[offset + 1]])
+    let bytes = buffer
+        .get(offset..offset + 2)
+        .and_then(|s| s.try_into().ok())
+        .unwrap_or([0; 2]);
+    o.read_u16(bytes)
 }
 
 pub fn u32_at(o: ByteOrder, buffer: &[u8], offset: usize) -> u32 {
-    o.read_u32([
-        buffer[offset],
-        buffer[offset + 1],
-        buffer[offset + 2],
-        buffer[offset + 3],
-    ])
+    let bytes = buffer
+        .get(offset..offset + 4)
+        .and_then(|s| s.try_into().ok())
+        .unwrap_or([0; 4]);
+    o.read_u32(bytes)
 }
+
+pub fn u64_at(o: ByteOrder, buffer: &[u8], offset: usize) -> u64 {
+    let bytes = buffer
+        .get(offset..offset + 8)
+        .and_then(|s| s.try_into().ok())
+        .unwrap_or([0; 8]);
+    o.read_u64(bytes)
+}
+
 pub fn slice_at<'a>(
     buf: &'a [u8],
     what: &'static str,
@@ -35,19 +49,8 @@ pub fn slice_at<'a>(
         buffer_len: buf.len(),
     })
 }
-pub fn u64_at(o: ByteOrder, buffer: &[u8], offset: usize) -> u64 {
-    o.read_u64([
-        buffer[offset],
-        buffer[offset + 1],
-        buffer[offset + 2],
-        buffer[offset + 3],
-        buffer[offset + 4],
-        buffer[offset + 5],
-        buffer[offset + 6],
-        buffer[offset + 7],
-    ])
-}
-pub fn name_at<'a>(strtab: &'a [u8], offset: u32) -> Option<&'a CStr> {
-    let start = usize::try_from(offset).ok()?;
-    CStr::from_bytes_until_nul(strtab.get(start..)?).ok()
+
+pub fn name_at(strtab: &[u8], offset: u32) -> Option<&CStr> {
+    let slice = strtab.get(offset as usize..)?;
+    CStr::from_bytes_until_nul(slice).ok()
 }

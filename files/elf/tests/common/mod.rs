@@ -272,3 +272,84 @@ pub fn find_symbol(file: &ElfFile<'_>, wanted: &str) -> Option<Sym64> {
     }
     None
 }
+
+
+#[allow(clippy::too_many_arguments)]
+fn push_shdr32(
+    order: ByteOrder,
+    buf: &mut Vec<u8>,
+    name: u32,
+    sh_type: u32,
+    offset: u32,
+    size: u32,
+    link: u32,
+    info: u32,
+    align: u32,
+    entsize: u32,
+) {
+    for val in [name, sh_type, 0, 0, offset, size, link, info, align, entsize] {
+        push_u32(order, buf, val);
+    }
+}
+
+fn push_sym32(
+    order: ByteOrder,
+    buf: &mut Vec<u8>,
+    name: u32,
+    value: u32,
+    size: u32,
+    info: u8,
+    shndx: u16,
+) {
+    push_u32(order, buf, name);
+    push_u32(order, buf, value);
+    push_u32(order, buf, size);
+    buf.push(info);
+    buf.push(0); // st_other
+    push_u16(order, buf, shndx);
+}
+
+pub fn build_elf32(o: ByteOrder) -> Vec<u8> {
+    const SHSTRTAB32: &[u8] = b"\0.shstrtab\0.strtab\0.symtab\0"; // 27 bytes
+    const STRTAB32: &[u8] = b"\0main\0g\0"; // 8 bytes
+
+    let mut buf = make_ident(o, 1);
+
+    // ehdr32 
+    push_u16(o, &mut buf, ET_EXEC);
+    push_u16(o, &mut buf, EM_386);
+    push_u32(o, &mut buf, 1);
+    push_u32(o, &mut buf, 0x0804_8000);
+    push_u32(o, &mut buf, 52); // e_phoff
+    push_u32(o, &mut buf, 168); // e_shoff
+    push_u32(o, &mut buf, 0);
+    push_u16(o, &mut buf, 52);
+    push_u16(o, &mut buf, 32);
+    push_u16(o, &mut buf, 1);
+    push_u16(o, &mut buf, 40);
+    push_u16(o, &mut buf, 4);
+    push_u16(o, &mut buf, 1);
+
+    //  p_flags at offset 24 for phdr32
+    for val in [PT_LOAD, 0, 0x0804_8000, 0x0804_8000, 328, 328, PF_R | PF_X, 0x1000] {
+        push_u32(o, &mut buf, val);
+    }
+
+    // string tables + 1 byte padding to offset 120
+    buf.extend_from_slice(SHSTRTAB32);
+    buf.extend_from_slice(STRTAB32);
+    buf.push(0);
+
+    // .symtab at offset 120 (3 * 16 = 48 bytes)
+    push_sym32(o, &mut buf, 0, 0, 0, 0, 0);
+    push_sym32(o, &mut buf, 6, 0x0804_a000, 4, (STB_GLOBAL << 4) | STT_OBJECT, 2);
+    push_sym32(o, &mut buf, 1, 0x0804_8000, 0x20, (STB_GLOBAL << 4) | STT_FUNC, 3);
+
+    // section headers at offset 168 (4 * 40 = 160 bytes)
+    push_shdr32(o, &mut buf, 0, SHT_NULL, 0, 0, 0, 0, 0, 0);
+    push_shdr32(o, &mut buf, 1, SHT_STRTAB, 84, 27, 0, 0, 1, 0);
+    push_shdr32(o, &mut buf, 11, SHT_STRTAB, 111, 8, 0, 0, 1, 0);
+    push_shdr32(o, &mut buf, 19, SHT_SYMTAB, 120, 48, 2, 1, 4, 16);
+
+    buf
+}

@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -73,5 +73,11 @@ pub enum ElfError {
 
     #[error("arithmetic overflow while computing {what}")]
     Overflow { what: &'static str },
+
+    #[error("section type {found:#x} is not a symbol table (expected {expected})")]
+    InvalidSectionType {
+        expected: &'static str,
+        found: u32,
+    },
 }
    

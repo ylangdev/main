@@ -5,9 +5,9 @@ use crate::parser::b64::sections::section_headers;
 use crate::parser::shared::slice_at;
 use crate::parser::ElfFile;
 use crate::types::header::ElfClass;
-use crate::types::section::Shdr64;
 use crate::types::symbol::{Sym64, SYM64_SIZE};
 use crate::{ElfError, Result};
+use crate::types::section::{SectionType, Shdr64};
 
 
 
@@ -28,6 +28,15 @@ pub fn symbols<'a>(
         return Err(ElfError::ClassMismatch {
             expected: ElfClass::Elf64,
             found: file.class,
+        });
+    }
+    if !matches!(
+        symtab.section_type(),
+        SectionType::SymTab | SectionType::DynSym
+    ) {
+        return Err(ElfError::InvalidSectionType {
+            expected: "SHT_SYMTAB or SHT_DYNSYM",
+            found: symtab.sh_type,
         });
     }
 

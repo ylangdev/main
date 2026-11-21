@@ -1,13 +1,17 @@
-use crate::Result;
+pub mod b32;
 pub mod b64;
 pub mod shared;
 
 use ::shared::byte_order::ByteOrder;
-use zerocopy::{BigEndian, LittleEndian};
+use ::shared::structs::parse_static_struct;
 
-use crate::types::header::{Ehdr32, Ehdr64, ElfClass, ElfData, ElfType, Ident};
+use crate::parser::shared::slice_at;
+use crate::types::header::{
+    Ehdr32, Ehdr64, ElfClass, ElfData, ElfType, Ident, EHDR32_SIZE, EHDR64_SIZE, EI_NIDENT,
+    EV_CURRENT,
+};
 use crate::types::machine::Machine;
-
+use crate::{ElfError, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ElfHeader {
@@ -52,11 +56,9 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfFile<'_>> {
         ElfData::Big => ByteOrder::BigEndian,
     };
 
-    let ehdr = match (class, byte_order) {
-        (ElfClass::Elf32, ByteOrder::LittleEndian) => parse_ehdr32::<LittleEndian>(bytes)?,
-        (ElfClass::Elf32, ByteOrder::BigEndian) => parse_ehdr32::<BigEndian>(bytes)?,
-        (ElfClass::Elf64, ByteOrder::LittleEndian) => parse_ehdr64::<LittleEndian>(bytes)?,
-        (ElfClass::Elf64, ByteOrder::BigEndian) => parse_ehdr64::<BigEndian>(bytes)?,
+    let ehdr = match class {
+        ElfClass::Elf32 => parse_ehdr32(byte_order, bytes)?,
+        ElfClass::Elf64 => parse_ehdr64(byte_order, bytes)?,
     };
 
     Ok(ElfFile {
@@ -68,45 +70,90 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfFile<'_>> {
     })
 }
 
-fn parse_ehdr32<O: zerocopy::ByteOrder>(bytes: &[u8]) -> Result<ElfHeader> {
-    let raw = Ehdr32::<O>::parse(bytes)?;
-    raw.validate()?;
+fn parse_ehdr32(byte_order: ByteOrder, bytes: &[u8]) -> Result<ElfHeader> {
+    let body_len = EHDR32_SIZE - EI_NIDENT;
+    let raw_slice = slice_at(bytes, "ELF32 header", EI_NIDENT as u64, body_len as u64)
+        .map_err(|_| ElfError::UnexpectedEof {
+            offset: 0,
+            needed: EHDR32_SIZE,
+            available: bytes.len(),
+        })?;
+
+    let raw = parse_static_struct::<36, Ehdr32>(byte_order, raw_slice)
+        .ok_or(ElfError::UnexpectedEof {
+            offset: 0,
+            needed: EHDR32_SIZE,
+            available: bytes.len(),
+        })?;
+
+    if raw.e_version != u32::from(EV_CURRENT) {
+        return Err(ElfError::UnsupportedVersion(raw.e_version));
+    }
+
+    if usize::from(raw.e_ehsize) != EHDR32_SIZE {
+        return Err(ElfError::InvalidHeaderSize {
+            expected: EHDR32_SIZE as u16,
+            found: raw.e_ehsize,
+        });
+    }
 
     Ok(ElfHeader {
-        file_type: raw.file_type(),
-        machine: Machine::from(raw.e_machine.get()),
-        version: raw.e_version.get(),
-        entry: u64::from(raw.e_entry.get()),
-        phoff: u64::from(raw.e_phoff.get()),
-        shoff: u64::from(raw.e_shoff.get()),
-        flags: raw.e_flags.get(),
-        ehsize: raw.e_ehsize.get(),
-        phentsize: raw.e_phentsize.get(),
-        phnum: raw.e_phnum.get(),
-        shentsize: raw.e_shentsize.get(),
-        shnum: raw.e_shnum.get(),
-        shstrndx: raw.e_shstrndx.get(),
+        file_type: ElfType::from(raw.e_type),
+        machine: Machine::from(raw.e_machine),
+        version: raw.e_version,
+        entry: u64::from(raw.e_entry),
+        phoff: u64::from(raw.e_phoff),
+        shoff: u64::from(raw.e_shoff),
+        flags: raw.e_flags,
+        ehsize: raw.e_ehsize,
+        phentsize: raw.e_phentsize,
+        phnum: raw.e_phnum,
+        shentsize: raw.e_shentsize,
+        shnum: raw.e_shnum,
+        shstrndx: raw.e_shstrndx,
     })
 }
 
-fn parse_ehdr64<O: zerocopy::ByteOrder>(bytes: &[u8]) -> Result<ElfHeader> {
-    let raw = Ehdr64::<O>::parse(bytes)?;
-    raw.validate()?;
+fn parse_ehdr64(byte_order: ByteOrder, bytes: &[u8]) -> Result<ElfHeader> {
+    let body_len = EHDR64_SIZE - EI_NIDENT;
+    let raw_slice = slice_at(bytes, "ELF64 header", EI_NIDENT as u64, body_len as u64)
+        .map_err(|_| ElfError::UnexpectedEof {
+            offset: 0,
+            needed: EHDR64_SIZE,
+            available: bytes.len(),
+        })?;
+
+    let raw = parse_static_struct::<48, Ehdr64>(byte_order, raw_slice)
+        .ok_or(ElfError::UnexpectedEof {
+            offset: 0,
+            needed: EHDR64_SIZE,
+            available: bytes.len(),
+        })?;
+
+    if raw.e_version != u32::from(EV_CURRENT) {
+        return Err(ElfError::UnsupportedVersion(raw.e_version));
+    }
+
+    if usize::from(raw.e_ehsize) != EHDR64_SIZE {
+        return Err(ElfError::InvalidHeaderSize {
+            expected: EHDR64_SIZE as u16,
+            found: raw.e_ehsize,
+        });
+    }
 
     Ok(ElfHeader {
-        file_type: raw.file_type(),
-        machine: Machine::from(raw.e_machine.get()),
-        version: raw.e_version.get(),
-        entry: raw.e_entry.get(),
-        phoff: raw.e_phoff.get(),
-        shoff: raw.e_shoff.get(),
-        flags: raw.e_flags.get(),
-        ehsize: raw.e_ehsize.get(),
-        phentsize: raw.e_phentsize.get(),
-        phnum: raw.e_phnum.get(),
-        shentsize: raw.e_shentsize.get(),
-        shnum: raw.e_shnum.get(),
-        shstrndx: raw.e_shstrndx.get(),
+        file_type: ElfType::from(raw.e_type),
+        machine: Machine::from(raw.e_machine),
+        version: raw.e_version,
+        entry: raw.e_entry,
+        phoff: raw.e_phoff,
+        shoff: raw.e_shoff,
+        flags: raw.e_flags,
+        ehsize: raw.e_ehsize,
+        phentsize: raw.e_phentsize,
+        phnum: raw.e_phnum,
+        shentsize: raw.e_shentsize,
+        shnum: raw.e_shnum,
+        shstrndx: raw.e_shstrndx,
     })
 }
-
