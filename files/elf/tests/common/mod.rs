@@ -250,10 +250,10 @@ pub fn sample(name: &str) -> Vec<u8> {
 pub fn find_section(file: &ElfFile<'_>, wanted: &str) -> Option<Shdr64> {
     let iter = section_headers(file).ok()?;
     for hdr in iter.flatten() {
-        if let Ok(Some(name)) = section_name(file, &hdr) {
-            if name.to_bytes() == wanted.as_bytes() {
-                return Some(hdr);
-            }
+        if let Ok(Some(name)) = section_name(file, &hdr)
+            && name.to_bytes() == wanted.as_bytes()
+        {
+            return Some(hdr);
         }
     }
     None
@@ -264,15 +264,14 @@ pub fn find_symbol(file: &ElfFile<'_>, wanted: &str) -> Option<Sym64> {
     let strtab = strtab_for(file, &symtab).ok()?;
     let iter = symbols(file, &symtab).ok()?;
     for sym in iter.flatten() {
-        if let Some(name) = name_at(strtab, sym.st_name) {
-            if name.to_bytes() == wanted.as_bytes() {
-                return Some(sym);
-            }
+        if let Some(name) = name_at(strtab, sym.st_name)
+            && name.to_bytes() == wanted.as_bytes()
+        {
+            return Some(sym);
         }
     }
     None
 }
-
 
 #[allow(clippy::too_many_arguments)]
 fn push_shdr32(
